@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#141422">
+  <title>よみあげカメラ</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/tesseract.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>📖 よみあげカメラ</h1>
+    <span id="status-badge" class="badge idle">停止中</span>
+  </header>
+
+  <main>
+    <!-- カメラプレビュー -->
+    <div id="camera-container">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="capture-canvas" hidden></canvas>
+      <div id="camera-error" class="overlay hidden">
+        <p>カメラを起動できませんでした。<br>カメラの使用を許可して再読み込みしてください。</p>
+        <button id="retry-camera" class="btn secondary">再試行</button>
+      </div>
+      <div id="init-overlay" class="overlay hidden">
+        <div class="spinner"></div>
+        <p>文字認識エンジンを準備しています…<br><small>(初回のみ時間がかかります)</small></p>
+      </div>
+      <!-- 認識中インジケータ -->
+      <div id="ocr-indicator" class="corner-indicator hidden">
+        <div class="spinner small"></div>
+      </div>
+    </div>
+
+    <!-- メイン操作:開始 / 終了 のみ -->
+    <div id="controls">
+      <button id="start-btn" class="btn primary big">▶ 読書をはじめる</button>
+      <button id="stop-btn" class="btn danger big hidden">⏹ 読書をおわる</button>
+    </div>
+
+    <p id="hint" class="hint">
+      本にカメラを向けて「読書をはじめる」を押してください。<br>
+      あとはページをめくるだけで、自動で読み上げが続きます。
+    </p>
+
+    <!-- いま読んでいるテキスト -->
+    <section id="now-reading" class="hidden">
+      <h2>いま読んでいる文章</h2>
+      <p id="current-text"></p>
+      <div class="sub-controls">
+        <button id="skip-btn" class="btn secondary">⏭ このページを飛ばす</button>
+      </div>
+    </section>
+
+    <!-- 設定 -->
+    <section id="settings">
+      <div class="rate-control">
+        <label for="rate">読み上げの速さ: <span id="rate-value">1.0</span></label>
+        <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1">
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="vertical-toggle">
+        縦書きの本を読む(小説など)
+      </label>
+    </section>
+  </main>
+
+  <footer>
+    <p>画像の処理はすべて端末内で行われます</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
