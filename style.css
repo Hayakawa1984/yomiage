@@ -81,7 +81,7 @@ main {
   gap: 14px;
 }
 
-/* ---- カメラ ---- */
+/* ---- カメラ(ジェスチャー操作エリア) ---- */
 #camera-container {
   position: relative;
   width: 100%;
@@ -89,6 +89,9 @@ main {
   background: #000;
   border-radius: var(--radius);
   overflow: hidden;
+  touch-action: none; /* スワイプでページがスクロールしないように */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #video {
@@ -258,6 +261,144 @@ main {
 .rate-control input[type="range"] {
   width: 100%;
   accent-color: var(--primary);
+}
+
+/* ---- ジェスチャー用オーバーレイ ---- */
+.center-pill {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(10, 10, 20, 0.8);
+  color: #fff;
+  font-size: 1.6rem;
+  font-weight: 700;
+  padding: 14px 26px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#pause-overlay {
+  font-size: 1.05rem;
+}
+
+.flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 40, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text);
+  padding: 12px 20px;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+/* ---- APIキー設定 ---- */
+.api-key-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.api-key-control input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 1rem;
+}
+
+.small {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.small a {
+  color: var(--primary);
+}
+
+/* ---- しおり ---- */
+#bookmarks-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#bookmarks-section h2 {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+}
+
+#bookmark-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bookmark-item {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.bookmark-head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 0.9rem;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.bookmark-detail {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bookmark-detail p {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  max-height: 30dvh;
+  overflow-y: auto;
+}
+
+.bookmark-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bookmark-actions .btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 0.9rem;
 }
 
 footer {
