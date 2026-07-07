@@ -1,0 +1,18 @@
+{
+  "name": "よみあげカメラ",
+  "short_name": "よみあげ",
+  "description": "カメラに映った本のページを自動で読み上げるアプリ",
+  "lang": "ja",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#141422",
+  "theme_color": "#141422",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
