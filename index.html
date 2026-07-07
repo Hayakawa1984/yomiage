@@ -7,7 +7,7 @@
   <title>よみあげカメラ</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css">
   <script src="vendor/tesseract.min.js"></script>
 </head>
 <body>
@@ -17,7 +17,7 @@
   </header>
 
   <main>
-    <!-- カメラプレビュー(ジェスチャー操作エリア) -->
+    <!-- カメラプレビュー -->
     <div id="camera-container">
       <video id="video" autoplay playsinline muted></video>
       <canvas id="capture-canvas" hidden></canvas>
@@ -27,16 +27,12 @@
       </div>
       <div id="init-overlay" class="overlay hidden">
         <div class="spinner"></div>
-        <p>文字認識の準備をしています…</p>
+        <p>文字認識エンジンを準備しています…<br><small>(初回のみ時間がかかります)</small></p>
       </div>
       <!-- 認識中インジケータ -->
       <div id="ocr-indicator" class="corner-indicator hidden">
         <div class="spinner small"></div>
       </div>
-      <!-- ジェスチャー用オーバーレイ -->
-      <div id="rate-overlay" class="center-pill hidden">1.0×</div>
-      <div id="pause-overlay" class="center-pill hidden">⏸ 一時停止中(タップで再開)</div>
-      <div id="flash" class="flash hidden"></div>
     </div>
 
     <!-- メイン操作:開始 / 終了 のみ -->
@@ -65,36 +61,17 @@
         <label for="rate">読み上げの速さ: <span id="rate-value">1.0</span></label>
         <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1">
       </div>
-      <div class="api-key-control">
-        <label for="gemini-key">Gemini APIキー(設定すると縦書きも高精度に)</label>
-        <input type="password" id="gemini-key" placeholder="AIza… をここに貼り付け" autocomplete="off">
-        <p class="small">
-          無料で取得できます:
-          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
-          をGoogleアカウントで開き「APIキーを作成」→ コピーして貼り付け
-        </p>
-        <p id="ocr-mode-note" class="small"></p>
-      </div>
-      <label class="toggle" id="vertical-row">
+      <div class="toggle-row">
+        <label for="vertical-toggle">縦書きの本を読む</label>
         <input type="checkbox" id="vertical-toggle">
-        縦書きの本を読む(小説など)
-      </label>
-    </section>
-
-    <!-- しおり -->
-    <section id="bookmarks-section">
-      <h2>🔖 しおり</h2>
-      <p id="no-bookmarks" class="small">まだしおりはありません。読書中に画面を3回タップすると挟めます。</p>
-      <ul id="bookmark-list"></ul>
+      </div>
     </section>
   </main>
 
   <footer>
-    <p>タップ=一時停止/再開 ・ 上下スワイプ=速さ ・ 2回タップ=ページ保存 ・ 3回タップ=しおり</p>
+    <p>画像の処理はすべて端末内で行われます</p>
   </footer>
 
-  <div id="toast" class="toast hidden"></div>
-
-  <script src="app.js?v=2"></script>
+  <script src="app.js"></script>
 </body>
 </html>

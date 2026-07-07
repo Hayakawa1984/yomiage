@@ -6,14 +6,13 @@
 
 :root {
   --bg: #141422;
-  --surface: #23233a;
+  --surface: #22223a;
   --text: #eaeaf2;
   --text-dim: #9c9cb5;
   --primary: #4a7cff;
   --primary-press: #3a63cc;
   --danger: #e05555;
-  --ok: #3dbb7c;
-  --warn: #e0a13c;
+  --green: #3dbf72;
   --radius: 14px;
 }
 
@@ -31,7 +30,6 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
   max-width: 560px;
   width: 100%;
   margin: 0 auto;
@@ -45,29 +43,20 @@ header h1 {
 .badge {
   font-size: 0.8rem;
   font-weight: 600;
-  padding: 6px 12px;
+  padding: 5px 12px;
   border-radius: 999px;
-  white-space: nowrap;
-}
-
-.badge.idle {
   background: var(--surface);
   color: var(--text-dim);
 }
 
 .badge.watching {
-  background: rgba(224, 161, 60, 0.15);
-  color: var(--warn);
-}
-
-.badge.ocr {
-  background: rgba(74, 124, 255, 0.15);
-  color: var(--primary);
+  background: rgba(74, 124, 255, 0.2);
+  color: #8fb0ff;
 }
 
 .badge.speaking {
-  background: rgba(61, 187, 124, 0.15);
-  color: var(--ok);
+  background: rgba(61, 191, 114, 0.2);
+  color: #7fdca6;
 }
 
 main {
@@ -81,7 +70,7 @@ main {
   gap: 14px;
 }
 
-/* ---- カメラ(ジェスチャー操作エリア) ---- */
+/* ---- カメラ ---- */
 #camera-container {
   position: relative;
   width: 100%;
@@ -89,9 +78,6 @@ main {
   background: #000;
   border-radius: var(--radius);
   overflow: hidden;
-  touch-action: none; /* スワイプでページがスクロールしないように */
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 #video {
@@ -125,8 +111,8 @@ main {
 }
 
 .spinner {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border: 4px solid rgba(255, 255, 255, 0.2);
   border-top-color: var(--primary);
   border-radius: 50%;
@@ -176,7 +162,7 @@ main {
 
 .btn.secondary {
   background: var(--surface);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--text-dim);
 }
 
 .btn.danger {
@@ -191,8 +177,8 @@ main {
 .hint {
   color: var(--text-dim);
   font-size: 0.9rem;
-  line-height: 1.7;
   text-align: center;
+  line-height: 1.7;
 }
 
 /* ---- いま読んでいる文章 ---- */
@@ -231,23 +217,6 @@ main {
   background: var(--surface);
   border-radius: var(--radius);
   padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.95rem;
-  color: var(--text);
-}
-
-.toggle input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--primary);
 }
 
 .rate-control {
@@ -263,142 +232,19 @@ main {
   accent-color: var(--primary);
 }
 
-/* ---- ジェスチャー用オーバーレイ ---- */
-.center-pill {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(10, 10, 20, 0.8);
-  color: #fff;
-  font-size: 1.6rem;
-  font-weight: 700;
-  padding: 14px 26px;
-  border-radius: 999px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-#pause-overlay {
-  font-size: 1.05rem;
-}
-
-.flash {
-  position: absolute;
-  inset: 0;
-  background: #fff;
-  opacity: 0.85;
-  pointer-events: none;
-}
-
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 28px;
-  transform: translateX(-50%);
-  background: rgba(20, 20, 40, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: var(--text);
-  padding: 12px 20px;
-  border-radius: 999px;
-  font-size: 0.95rem;
-  white-space: nowrap;
-  z-index: 10;
-}
-
-/* ---- APIキー設定 ---- */
-.api-key-control {
+.toggle-row {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
   font-size: 0.9rem;
   color: var(--text-dim);
 }
 
-.api-key-control input {
-  width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
-  background: var(--bg);
-  color: var(--text);
-  padding: 10px 12px;
-  font-size: 1rem;
-}
-
-.small {
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  line-height: 1.6;
-}
-
-.small a {
-  color: var(--primary);
-}
-
-/* ---- しおり ---- */
-#bookmarks-section {
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-#bookmarks-section h2 {
-  font-size: 0.95rem;
-  color: var(--text-dim);
-}
-
-#bookmark-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.bookmark-item {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.bookmark-head {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  color: var(--text);
-  font-size: 0.9rem;
-  padding: 12px;
-  cursor: pointer;
-}
-
-.bookmark-detail {
-  padding: 0 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.bookmark-detail p {
-  font-size: 0.95rem;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  max-height: 30dvh;
-  overflow-y: auto;
-}
-
-.bookmark-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.bookmark-actions .btn {
-  flex: 1;
-  padding: 10px;
-  font-size: 0.9rem;
+.toggle-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--primary);
 }
 
 footer {

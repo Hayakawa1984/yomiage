@@ -1,7 +1,7 @@
 {
   "name": "よみあげカメラ",
   "short_name": "よみあげ",
-  "description": "カメラに映った本のページを自動で読み上げるアプリ",
+  "description": "ページをめくるだけで、カメラに映った文章を自動で読み上げるアプリ",
   "lang": "ja",
   "start_url": ".",
   "display": "standalone",
