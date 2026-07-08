@@ -1,56 +1,63 @@
-// よみあげカメラ — ハンズフリー自動読み上げ
+// よみあげカメラ
+// ページをめくるだけで自動的に文字認識 → 読み上げが続くハンズフリー読書アプリ。
 //
-// 「読書をはじめる」を押したあとは操作不要:
-//   カメラ映像を監視 → ページが静止したら OCR → 新しい文章なら自動で読み上げ。
-//   ページをめくるたびにこれを繰り返す。
+// 仕組み:
+//   1. カメラ映像を縮小グレースケールで常時サンプリングし、フレーム差分で動きを検出
+//   2. ページが静止し、かつ前回OCRした映像から変化していたら新しいページとみなしてOCR
+//   3. 認識テキストが直前に読んだ内容と十分違うときだけ読み上げキューへ追加
+//   4. 読み上げ中も監視は続くので、先にページをめくれば次ページが順番待ちになる
 
-// ---- 調整パラメータ ----
-const SAMPLE_INTERVAL_MS = 400; // フレーム監視の間隔
-const SAMPLE_W = 48; // 動き検出用の縮小サイズ
-const SAMPLE_H = 64;
-const PIXEL_DELTA = 25; // 1画素あたりこれを超える輝度差 = 「変化した画素」とみなす
-const MOTION_FRACTION = 0.1; // 変化画素が10%を超えたら動いている(ページめくり中)
-const STABLE_COUNT = 3; // 静止とみなす連続回数(約1.2秒)
-const SCENE_FRACTION = 0.015; // 前回OCRした画面から1.5%以上の画素が変化していたら新しいページ
-const SIMILARITY_SKIP = 0.75; // 前回読んだ文章とこれ以上似ていたら同じページとみなす
-
-// ---- DOM ----
 const video = document.getElementById("video");
 const captureCanvas = document.getElementById("capture-canvas");
-const statusBadge = document.getElementById("status-badge");
 const startBtn = document.getElementById("start-btn");
 const stopBtn = document.getElementById("stop-btn");
 const skipBtn = document.getElementById("skip-btn");
-const nowReading = document.getElementById("now-reading");
-const currentText = document.getElementById("current-text");
+const statusBadge = document.getElementById("status-badge");
 const cameraError = document.getElementById("camera-error");
 const retryCameraBtn = document.getElementById("retry-camera");
 const initOverlay = document.getElementById("init-overlay");
 const ocrIndicator = document.getElementById("ocr-indicator");
+const nowReading = document.getElementById("now-reading");
+const currentText = document.getElementById("current-text");
+const hint = document.getElementById("hint");
 const rateInput = document.getElementById("rate");
 const rateValue = document.getElementById("rate-value");
-const hint = document.getElementById("hint");
+const verticalToggle = document.getElementById("vertical-toggle");
+
+// ---- チューニング用定数 ----
+const SAMPLE_INTERVAL_MS = 400; // フレーム監視の間隔
+const SAMPLE_W = 48;            // 監視用の縮小サイズ
+const SAMPLE_H = 64;
+const MOTION_THRESHOLD = 6;     // これ以上の差分は「動いている」(0-255の平均絶対差)
+const STABLE_SAMPLES = 3;       // 静止とみなす連続サンプル数(≒1.2秒)
+const NEW_PAGE_THRESHOLD = 10;  // 前回OCRした映像との差分がこれ以上なら新しいページ
+const SIMILARITY_SKIP = 0.75;   // 直前の読み上げとの類似度がこれ以上なら同じページとみなす
+const MIN_TEXT_LENGTH = 4;      // これより短い認識結果はノイズとして無視
 
 // ---- 状態 ----
 let stream = null;
 let running = false;
-let monitorTimer = null;
-let ocrBusy = false;
-let wakeLock = null;
+let sampleTimer = null;
 let ocrWorkerPromise = null;
-
-let prevSample = null; // 直前の監視フレーム(動き検出用)
-let stableCount = 0;
-let lastProcessedFrame = null; // 最後にOCRした画面(新ページ判定用)
-let lastSpokenText = ""; // 最後に読み上げた文章(重複読み防止用)
-
-let sentenceQueue = []; // 読み上げ待ちの文
-let speakToken = 0; // スキップ/停止時に古い utterance の連鎖を無効化する
+let ocrBusy = false;
+let verticalMode = false; // 縦書きの本モード
+let wakeLock = null;
 
 const sampleCanvas = document.createElement("canvas");
 sampleCanvas.width = SAMPLE_W;
 sampleCanvas.height = SAMPLE_H;
 const sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+
+let prevSample = null;        // 直前サンプル(動き検出用)
+let stableCount = 0;
+let motionSince = false;        // 前回OCR後にページめくり(動き)があったか
+let lastProcessedSample = null; // 最後にOCRしたページの映像
+let lastSpokenNorm = "";        // 最後に読み上げたテキスト(正規化済み)
+
+let pageQueue = [];   // 読み上げ待ちページ(1ページ = 文の配列)
+let speakingPage = []; // いま読んでいるページの残りの文
+let speakingNow = false;
+let activeUtter = null;
 
 // ---- カメラ ----
 
@@ -67,56 +74,85 @@ async function startCamera() {
     });
     video.srcObject = stream;
     await video.play();
-    return true;
   } catch (err) {
     console.error("カメラ起動エラー:", err);
     cameraError.classList.remove("hidden");
-    return false;
+  }
+}
+
+// ---- フレーム監視(動き・新ページ検出) ----
+
+function grabSample() {
+  if (!video.videoWidth) return null;
+  sampleCtx.drawImage(video, 0, 0, SAMPLE_W, SAMPLE_H);
+  const { data } = sampleCtx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
+  const gray = new Uint8Array(SAMPLE_W * SAMPLE_H);
+  for (let i = 0; i < gray.length; i++) {
+    const p = i * 4;
+    gray[i] = (data[p] * 3 + data[p + 1] * 6 + data[p + 2]) / 10;
+  }
+  return gray;
+}
+
+function frameDiff(a, b) {
+  if (!a || !b) return 255;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+  return sum / a.length;
+}
+
+function onSampleTick() {
+  if (!running || ocrBusy) return;
+
+  const sample = grabSample();
+  if (!sample) return;
+
+  const motion = frameDiff(sample, prevSample);
+  prevSample = sample;
+
+  if (motion > MOTION_THRESHOLD) {
+    stableCount = 0; // ページめくり中・手ブレ中
+    motionSince = true;
+    return;
+  }
+
+  stableCount++;
+  if (stableCount < STABLE_SAMPLES) return;
+
+  // ページが静止した。めくり動作(動き)のあとか、映像が前回OCR時から
+  // 変わっていれば読み取る。本のページ同士は「白地に黒文字」で映像差分が
+  // 小さいことがあるため、動きの有無を主な判定に使う。
+  // (同じページの読み直しはテキスト類似度チェックが防ぐ)
+  if (motionSince || frameDiff(sample, lastProcessedSample) > NEW_PAGE_THRESHOLD) {
+    motionSince = false;
+    lastProcessedSample = sample;
+    recognizePage();
   }
 }
 
 // ---- OCR ----
 
-let verticalMode = false; // 縦書きの本(小説など)を読むモード
-
 function getOcrWorker() {
   if (!ocrWorkerPromise) {
-    // 横書き: 日本語+英語 / 縦書き: 縦書き用日本語モデル + 縦一列ブロックのレイアウト指定
+    // 認識エンジン・言語データはすべて同梱(vendor/)しているため、外部への通信は発生しない
     const langs = verticalMode ? "jpn_vert" : "jpn+eng";
     ocrWorkerPromise = Tesseract.createWorker(langs, 1, {
       workerPath: "vendor/worker.min.js",
       corePath: "vendor/core",
       langPath: "vendor/lang",
-    })
-      .then(async (worker) => {
-        if (verticalMode) {
-          await worker.setParameters({
-            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK_VERT_TEXT,
-          });
-        }
-        return worker;
-      })
-      .catch((err) => {
-        ocrWorkerPromise = null; // 失敗したら次回作り直せるように
-        throw err;
-      });
+    }).then(async (worker) => {
+      if (verticalMode) {
+        await worker.setParameters({
+          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK_VERT_TEXT,
+        });
+      }
+      return worker;
+    });
   }
   return ocrWorkerPromise;
 }
 
-async function resetOcrWorker() {
-  const old = ocrWorkerPromise;
-  ocrWorkerPromise = null;
-  if (old) {
-    try {
-      (await old).terminate();
-    } catch (_) {
-      /* 生成に失敗していた場合は何もしない */
-    }
-  }
-}
-
-// Tesseract の日本語出力に入る文字間の余計な空白を除去する
+// Tesseractの日本語出力に入る文字間の余計な空白を除去する
 function cleanText(raw) {
   return raw
     .split("\n")
@@ -129,79 +165,41 @@ function cleanText(raw) {
     .join("\n");
 }
 
-// ---- テキスト類似度(文字bigramのDice係数) ----
-
-function bigrams(text) {
-  const normalized = text.replace(/[\s。、．，!?！?「」『』()（)]/g, "");
-  const set = new Set();
-  for (let i = 0; i < normalized.length - 1; i++) {
-    set.add(normalized.slice(i, i + 2));
-  }
-  return set;
+function normalizeForCompare(text) {
+  return text.replace(/[\s、。・,.!?！?「」『』()()]/g, "");
 }
 
+// 文字bigramのDice係数(0〜1)。同じページを二度読まないための類似度判定
 function similarity(a, b) {
-  const ba = bigrams(a);
-  const bb = bigrams(b);
-  if (ba.size === 0 || bb.size === 0) return 0;
-  let common = 0;
-  for (const g of ba) if (bb.has(g)) common++;
-  return (2 * common) / (ba.size + bb.size);
-}
-
-// ---- フレーム監視(動き検出・新ページ判定) ----
-
-function grabSample() {
-  sampleCtx.drawImage(video, 0, 0, SAMPLE_W, SAMPLE_H);
-  const { data } = sampleCtx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
-  const gray = new Uint8ClampedArray(SAMPLE_W * SAMPLE_H);
-  for (let i = 0; i < gray.length; i++) {
-    const o = i * 4;
-    gray[i] = (data[o] + data[o + 1] + data[o + 2]) / 3;
-  }
-  return gray;
-}
-
-// 大きく変化した画素の割合(0〜1)。
-// 平均輝度差だと「白いページ上で文字だけ変わった」ケースを検出できないため、
-// 画素単位の変化を数える方式にしている。
-function changedFraction(a, b) {
-  let changed = 0;
-  for (let i = 0; i < a.length; i++) {
-    if (Math.abs(a[i] - b[i]) > PIXEL_DELTA) changed++;
-  }
-  return changed / a.length;
-}
-
-function monitorTick() {
-  if (!running || !stream || ocrBusy || video.videoWidth === 0) return;
-
-  const frame = grabSample();
-  if (prevSample) {
-    if (changedFraction(frame, prevSample) > MOTION_FRACTION) {
-      stableCount = 0; // ページめくり中・手ブレ中
-    } else {
-      stableCount++;
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const bigrams = (s) => {
+    const m = new Map();
+    for (let i = 0; i < s.length - 1; i++) {
+      const g = s.slice(i, i + 2);
+      m.set(g, (m.get(g) || 0) + 1);
     }
-  }
-  prevSample = frame;
-
-  if (stableCount < STABLE_COUNT) return; // まだ画面が落ち着いていない
-
-  // 静止した。前回OCRした画面と十分違うときだけ新しいページとして認識する
-  if (
-    !lastProcessedFrame ||
-    changedFraction(frame, lastProcessedFrame) > SCENE_FRACTION
-  ) {
-    lastProcessedFrame = frame;
-    recognizeCurrentFrame();
-  }
+    return m;
+  };
+  const ga = bigrams(a);
+  const gb = bigrams(b);
+  let overlap = 0;
+  for (const [g, n] of ga) if (gb.has(g)) overlap += Math.min(n, gb.get(g));
+  const total = (a.length - 1) + (b.length - 1);
+  return total > 0 ? (2 * overlap) / total : 0;
 }
 
-async function recognizeCurrentFrame() {
+// 読み上げしやすいように文単位に分割する
+function splitSentences(text) {
+  return text
+    .split(/(?<=[。!?!?])|\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+async function recognizePage() {
   ocrBusy = true;
   ocrIndicator.classList.remove("hidden");
-  updateStatus();
 
   try {
     captureCanvas.width = video.videoWidth;
@@ -210,23 +208,23 @@ async function recognizeCurrentFrame() {
 
     const worker = await getOcrWorker();
     const { data } = await worker.recognize(captureCanvas);
-    if (!running) return; // 認識中に「読書をおわる」が押された
+    if (!running) return; // 認識中に停止された
 
     const text = cleanText(data.text);
-    // 短すぎるものはノイズ(机や手だけが映った等)として無視
-    if (text.length >= 4 && similarity(text, lastSpokenText) < SIMILARITY_SKIP) {
-      lastSpokenText = text;
-      enqueueText(text);
-    }
+    const norm = normalizeForCompare(text);
+
+    if (norm.length < MIN_TEXT_LENGTH) return; // 文字のないページ・ノイズ
+    if (similarity(norm, lastSpokenNorm) >= SIMILARITY_SKIP) return; // 同じページ
+
+    lastSpokenNorm = norm;
+    pageQueue.push({ text, sentences: splitSentences(text) });
+    speakNext();
   } catch (err) {
     console.error("OCRエラー:", err);
   } finally {
     ocrBusy = false;
     ocrIndicator.classList.add("hidden");
-    // OCR中に手元が動いていた可能性があるので静止判定をやり直す
     stableCount = 0;
-    prevSample = null;
-    updateStatus();
   }
 }
 
@@ -242,29 +240,36 @@ function pickJapaneseVoice() {
   );
 }
 
-// 長文を一気に speak すると途切れるブラウザがあるため文単位に分割する
-function splitSentences(text) {
-  return text
-    .split(/(?<=[。!?！?])|\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function enqueueText(text) {
-  currentText.textContent = text;
-  nowReading.classList.remove("hidden");
-  sentenceQueue.push(...splitSentences(text));
-  if (!speechSynthesis.speaking) speakNext();
-  updateStatus();
-}
-
 function speakNext() {
-  if (!running || sentenceQueue.length === 0) {
-    updateStatus();
+  if (!running) return;
+
+  if (speakingPage.length === 0) {
+    const page = pageQueue.shift();
+    if (!page) {
+      speakingNow = false;
+      setStatus("watching");
+      return;
+    }
+    speakingPage = page.sentences.slice();
+    currentText.textContent = page.text;
+    nowReading.classList.remove("hidden");
+  }
+
+  if (speakingNow) return; // すでに読み上げチェーンが動いている
+
+  speakingNow = true;
+  speakSentence();
+}
+
+function speakSentence() {
+  const sentence = speakingPage.shift();
+  if (sentence === undefined) {
+    speakingNow = false;
+    speakNext(); // 次のページが待っていれば続けて読む
     return;
   }
-  const sentence = sentenceQueue.shift();
-  const token = speakToken;
+
+  setStatus("speaking");
 
   const utter = new SpeechSynthesisUtterance(sentence);
   utter.lang = "ja-JP";
@@ -272,24 +277,30 @@ function speakNext() {
   const voice = pickJapaneseVoice();
   if (voice) utter.voice = voice;
 
+  activeUtter = utter;
   utter.onend = utter.onerror = () => {
-    if (token !== speakToken) return; // スキップ/停止済みの連鎖は打ち切る
-    speakNext();
+    if (activeUtter !== utter) return; // skip等で無効化済み
+    activeUtter = null;
+    speakSentence();
   };
 
   speechSynthesis.speak(utter);
-  updateStatus();
 }
 
-function cancelSpeech() {
-  speakToken++;
-  sentenceQueue = [];
+function skipPage() {
+  speakingPage = [];
+  activeUtter = null; // 現在の文のonendを無効化
   speechSynthesis.cancel();
+  speakingNow = false;
+  speakNext();
 }
 
-function skipCurrentPage() {
-  cancelSpeech();
-  updateStatus();
+function stopSpeaking() {
+  pageQueue = [];
+  speakingPage = [];
+  activeUtter = null;
+  speakingNow = false;
+  speechSynthesis.cancel();
 }
 
 // ---- 画面スリープ防止 ----
@@ -299,7 +310,7 @@ async function acquireWakeLock() {
   try {
     wakeLock = await navigator.wakeLock.request("screen");
   } catch (err) {
-    console.warn("Wake Lock 取得失敗:", err);
+    console.warn("Wake Lockを取得できませんでした:", err);
   }
 }
 
@@ -311,124 +322,131 @@ function releaseWakeLock() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && running) acquireWakeLock();
-});
-
-// ---- 状態表示 ----
-
-function updateStatus() {
-  let cls, label;
-  if (!running) {
-    cls = "idle";
-    label = "停止中";
-  } else if (speechSynthesis.speaking || sentenceQueue.length > 0) {
-    cls = "speaking";
-    label = "🔊 読み上げ中";
-  } else if (ocrBusy) {
-    cls = "ocr";
-    label = "🔍 文字を認識中";
-  } else {
-    cls = "watching";
-    label = "👀 ページを待っています";
+  if (document.visibilityState === "visible" && running) {
+    acquireWakeLock(); // バックグラウンド復帰時に再取得
   }
-  statusBadge.className = `badge ${cls}`;
-  statusBadge.textContent = label;
-}
+});
 
 // ---- 開始 / 終了 ----
 
-async function startReading() {
-  startBtn.disabled = true;
+function setStatus(state) {
+  const labels = {
+    idle: "停止中",
+    watching: "ページを待っています",
+    speaking: "読み上げ中",
+  };
+  statusBadge.textContent = labels[state];
+  statusBadge.className = `badge ${state}`;
+}
 
-  if (!stream && !(await startCamera())) {
-    startBtn.disabled = false;
-    return;
+async function startReading() {
+  if (!stream) {
+    await startCamera();
+    if (!stream) return;
   }
 
-  // iOSのTTSはユーザー操作起点が必要なため、開始タップの中で一度発話しておく
+  // iOSのTTSはユーザー操作起点が必要なので、タップ直後に無音発話でアンロックする
   if ("speechSynthesis" in window) {
-    speechSynthesis.getVoices();
     const unlock = new SpeechSynthesisUtterance(" ");
     unlock.volume = 0;
     speechSynthesis.speak(unlock);
-  } else {
-    alert("このブラウザは音声読み上げに対応していません。");
-    startBtn.disabled = false;
-    return;
+    speechSynthesis.getVoices();
   }
 
-  // OCRエンジンの準備(初回は言語データのダウンロードで時間がかかる)
+  startBtn.disabled = true;
   initOverlay.classList.remove("hidden");
   try {
-    await getOcrWorker();
+    await getOcrWorker(); // 初回は言語データのダウンロードが走る
   } catch (err) {
-    console.error("OCRエンジン初期化エラー:", err);
-    alert("文字認識エンジンを読み込めませんでした。通信環境を確認して再度お試しください。");
+    console.error("認識エンジンの初期化に失敗:", err);
+    ocrWorkerPromise = null;
+    alert("文字認識エンジンを読み込めませんでした。通信環境を確認して再試行してください。");
+    return;
+  } finally {
     initOverlay.classList.add("hidden");
     startBtn.disabled = false;
-    return;
   }
-  initOverlay.classList.add("hidden");
 
   running = true;
   prevSample = null;
   stableCount = 0;
-  lastProcessedFrame = null;
-  lastSpokenText = "";
+  motionSince = false;
+  lastProcessedSample = null; // 開始時点で映っているページから読み始める
+  lastSpokenNorm = "";
 
   startBtn.classList.add("hidden");
-  startBtn.disabled = false;
   stopBtn.classList.remove("hidden");
-  hint.textContent = "ページをめくると自動で読み上げます。スマホは動かさず固定してください。";
+  hint.textContent = "ページをめくると自動で読み上げが続きます。";
+  setStatus("watching");
 
   acquireWakeLock();
-  monitorTimer = setInterval(monitorTick, SAMPLE_INTERVAL_MS);
-  updateStatus();
+  sampleTimer = setInterval(onSampleTick, SAMPLE_INTERVAL_MS);
 }
 
 function stopReading() {
   running = false;
-  clearInterval(monitorTimer);
-  monitorTimer = null;
-  cancelSpeech();
+  clearInterval(sampleTimer);
+  sampleTimer = null;
+  stopSpeaking();
   releaseWakeLock();
 
   stopBtn.classList.add("hidden");
   startBtn.classList.remove("hidden");
   nowReading.classList.add("hidden");
   ocrIndicator.classList.add("hidden");
-  currentText.textContent = "";
   hint.innerHTML =
     "本にカメラを向けて「読書をはじめる」を押してください。<br>あとはページをめくるだけで、自動で読み上げが続きます。";
-  updateStatus();
+  setStatus("idle");
 }
 
 // ---- イベント ----
 
 startBtn.addEventListener("click", startReading);
 stopBtn.addEventListener("click", stopReading);
-skipBtn.addEventListener("click", skipCurrentPage);
+skipBtn.addEventListener("click", skipPage);
 retryCameraBtn.addEventListener("click", startCamera);
 
 rateInput.addEventListener("input", () => {
   rateValue.textContent = parseFloat(rateInput.value).toFixed(1);
 });
 
-const verticalToggle = document.getElementById("vertical-toggle");
 verticalToggle.addEventListener("change", async () => {
   verticalMode = verticalToggle.checked;
-  await resetOcrWorker(); // 認識モデルを切り替えるためワーカーを作り直す
-  // いま映っているページを新モードで読み直せるように判定をリセット
-  lastProcessedFrame = null;
+
+  // モードに合った認識エンジンに切り替える(古いワーカーは破棄)
+  const oldWorkerPromise = ocrWorkerPromise;
+  ocrWorkerPromise = null;
+  if (oldWorkerPromise) {
+    try {
+      (await oldWorkerPromise).terminate();
+    } catch (e) {
+      /* 破棄失敗は無視 */
+    }
+  }
+
+  // いま映っているページをあらためて読み取れるようにリセット
+  lastProcessedSample = null;
+  lastSpokenNorm = "";
   stableCount = 0;
-  prevSample = null;
 });
 
-// 音声一覧を非同期で読み込むブラウザ向けに、先に読み込みを走らせておく
+// 音声一覧を非同期で読み込むブラウザ対策
 if ("speechSynthesis" in window) {
   speechSynthesis.getVoices();
+  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 }
 
-// 起動時にカメラのプレビューだけ開始しておく
+setStatus("idle");
 startCamera();
-updateStatus();
+
+// デバッグ用(開発時のみ使用)
+window.__yomiageDebug = () => ({
+  running,
+  ocrBusy,
+  stableCount,
+  queueLen: pageQueue.length,
+  speakingNow,
+  speakingLeft: speakingPage.length,
+  lastSpokenNorm,
+  videoW: video.videoWidth,
+});
